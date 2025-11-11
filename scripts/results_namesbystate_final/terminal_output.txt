@@ -27,6 +27,7 @@ Data summary per restaurant:
   Restaurant 2 (CA): 1,000 customers, 437 dishes
   Restaurant 3 (TX): 1,000 customers, 443 dishes
 Total unique dishes: 648
+Shared dishes (across all restaurants): {estimate with random sampling of 1000 customers per restaurant}
 
 STEP 2: Fit models
 
