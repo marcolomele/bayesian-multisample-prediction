@@ -1,0 +1,90 @@
+HPC - Bocconi Notes
+
+
+
+DSBA = Node3
+
+Login via ssh —> select (or create) folder for working in —> upload script + datafiles —> SLURM request —> Execute 
+
+Can save/build folders & files ONLY inside the login node
+- Can NOT write/save anything inside the compute nodes
+
+Log-in:
+ssh 3152128@slnode-da.sm.unibocconi.it
+Password:
+
+END:
+‘exit’ or ‘logout’
+
+Creating an Enviorment:
+conda create --name TEST python=3.9
+conda installl <package>
+
+Navigating in Linux:
+mkdir -p ~/IMA_Project/{scripts,data,outputs,logs}
+‘cd’ —> change directory
+‘cd -‘ —> previous directory
+‘ls’ —> see whats in your current directory
+‘chmod +x <file.type>’ —> sets file permission to executable
+source activate <enviorment_name>	—> enter enviorment
+conda deactivate —> exit enviorment
+
+SLURM:
+nano -u ~/<ENTER_FILE_PATH>		—> this will open SLURM
+
+#!/bin/bash
+#SBATCH --job-name=<ENTER_JOB_HERE>
+#SBATCH --account=3176145
+#SBATCH --partition=dsba
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=16G
+#SBATCH --time=120
+#SBATCH --output=../logs/%x_%j.out
+#SBATCH --error=../logs/%x_%j.err
+
+module load modules/miniconda3
+eval "$(conda shell.bash hook)"
+conda activate General_Env
+
+python scripts/<ENTER_SCRIPT_HERE>
+
+conda deactivate
+module unload modules/miniconda3
+
+
+nano -u ~/IMA_Project/scripts/trial_HPC_script.sh
+
+
+#!/bin/bash
+#SBATCH --job-name=Ioannis_trial_hpc
+#SBATCH --account=3176145
+#SBATCH --partition=dsba
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=16G
+#SBATCH --time=120
+#SBATCH --output=../logs/%x_%j.out
+#SBATCH --error=../logs/%x_%j.err
+
+module load modules/miniconda3
+eval "$(conda shell.bash hook)"
+conda activate General_Env
+
+python IMA_Project/scripts/trial_HPC_script.py
+
+conda deactivate
+module unload modules/miniconda3
+
+
+
+
+UPLOADING A FILE TO HPC:
+Make sure you are in the right file in the terminal (locally) —> then type the following: 
+scp <file_name> 3176145@slnode-da.sm.unibocconi.it:~/<Location_in_HPC>
+
+EXAMPLE:
+scp trial_HPC_script.py 3176145@slnode-da.sm.unibocconi.it:~/IMA_Project/scripts
+
+VPN connection instructions
+https://bocconi.sharepoint.com/sites/BocconiStudentsHPC/SitePages/SSH-Login.aspx
+
+scp IMA2025_Facebook_Aprilia_VideoComments.xlsx 3176145@slnode-da.sm.unibocconi.it:~/IMA_Project/data

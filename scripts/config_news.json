@@ -4,10 +4,10 @@
   "dish_col": "word",
   "count_col": "count",
   "restaurants": ["sci.space", "soc.religion.christian"],
-  "max_customers_per_restaurant": 2000,
+  "max_customers_per_restaurant": 1000,
   "train_ratio": 1.0,
   "seed": 42,
-  "num_fit_iterations": 10000,
+  "num_fit_iterations": 15000,
   "burn_in": 5000,
   "num_predict_iterations": 10000,
   "num_threads": 12,
@@ -18,6 +18,6 @@
   "theta_j": 1000.0,
   "update_params": true,
   "verbose": true,
-  "output_dir": "./results_news_final"
+  "output_dir": "./results_news_final_V2"
 }
 

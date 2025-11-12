@@ -2,6 +2,8 @@ import numpy as np
 from collections import defaultdict
 from typing import Dict, List, Tuple, Optional, Any
 import random
+from scipy.special import gammaln
+from priors import UniformPrior, GammaPrior
 
 
 def _defaultdict_int_factory():
@@ -68,6 +70,18 @@ class HierarchicalPitmanYorProcess:
         
         # Base measure H (if None, we'll use a simple discrete distribution)
         self.base_measure = base_measure
+        
+        # Priors for Bayesian inference
+        self.d_0_prior = UniformPrior(0, 1)
+        self.d_j_prior = UniformPrior(0, 1)
+        self.theta_0_prior = GammaPrior(shape=300, rate=0.2)
+        self.theta_j_prior = GammaPrior(shape=300, rate=0.2)
+        
+        # Adaptive proposal variances for M-H sampling
+        self._proposal_d = 0.01
+        self._proposal_theta = 10.0
+        self._accept_counts = {'d_0': 0, 'd_j': 0, 'theta_0': 0, 'theta_j': 0}
+        self._proposal_counts = {'d_0': 0, 'd_j': 0, 'theta_0': 0, 'theta_j': 0}
         
         # Chinese Restaurant Franchise representation
         # Tables at the base level (restaurant 0)
@@ -290,6 +304,10 @@ class HierarchicalPitmanYorProcess:
         
         self._next_table_id = 0
         self._next_dish_id = 0
+        
+        # Reset M-H acceptance tracking
+        self._accept_counts = {'d_0': 0, 'd_j': 0, 'theta_0': 0, 'theta_j': 0}
+        self._proposal_counts = {'d_0': 0, 'd_j': 0, 'theta_0': 0, 'theta_j': 0}
     
     def fit_from_data(
         self, 
@@ -376,7 +394,7 @@ class HierarchicalPitmanYorProcess:
             
             # Update hyperparameters via Metropolis-Hastings
             if update_params and iteration % 10 == 0:
-                self._update_parameters_mh(data_dict)
+                self._update_parameters_mh(data_dict, in_burnin=(iteration < burn_in))
             
             # Store samples after burn-in
             if iteration >= burn_in:
@@ -573,35 +591,193 @@ class HierarchicalPitmanYorProcess:
             # New dish from base measure
             return (self.theta_0 + self.d_0 * self.base_num_tables) / (self.theta_0 + total_base_customers)
     
-    def _update_parameters_mh(self, data_dict: Dict[int, List[str]]):
-        """Update hyperparameters using Metropolis-Hastings."""
-        # Simple random walk proposals
-        # In practice, should use better proposals based on gradients
+    def _compute_log_likelihood(self) -> float:
+        """
+        Compute log-likelihood of current CRF configuration.
+        
+        Based on the Chinese Restaurant Franchise representation.
+        Uses Pochhammer symbol identities for efficient computation.
+        
+        Returns:
+            Log-likelihood of current table configuration
+        """
+        log_lik = 0.0
+        
+        # Base level (G_0) contribution
+        total_base_customers = sum(self.base_table_counts.values())
+        
+        if total_base_customers > 0 and self.base_num_tables > 0:
+            # Numerator: Product_{r=1}^{k-1} (theta_0 + r * d_0)
+            for r in range(1, self.base_num_tables):
+                log_lik += np.log(self.theta_0 + r * self.d_0)
+            
+            # Denominator: (theta_0)_{n} = Gamma(theta_0 + n) / Gamma(theta_0)
+            # Computed as Product_{i=0}^{n-1} (theta_0 + i)
+            for i in range(total_base_customers):
+                log_lik -= np.log(self.theta_0 + i)
+            
+            # Table size contributions: Product over tables of (1 - d_0)_{n_t - 1}
+            for count in self.base_table_counts.values():
+                if count > 1:
+                    # (1-d_0)_{count-1} = (1-d_0) * (2-d_0) * ... * (count-1-d_0)
+                    # = Gamma(count) / Gamma(1-d_0) * Gamma(count + 1 - d_0) / Gamma(count)
+                    # For numerical stability, use: sum log(i - d_0) for i=1..count-1
+                    for i in range(1, count):
+                        log_lik += np.log(i - self.d_0)
+        
+        # Group level (G_j) contributions
+        for group_id in range(self.num_groups):
+            group_table_counts = self.group_table_counts[group_id]
+            num_customers_in_group = sum(group_table_counts.values())
+            num_tables_in_group = self.group_num_tables[group_id]
+            
+            if num_customers_in_group > 0 and num_tables_in_group > 0:
+                # Numerator: Product_{r=1}^{l-1} (theta_j + r * d_j)
+                for r in range(1, num_tables_in_group):
+                    log_lik += np.log(self.theta_j + r * self.d_j)
+                
+                # Denominator: (theta_j)_{n_j}
+                for i in range(num_customers_in_group):
+                    log_lik -= np.log(self.theta_j + i)
+                
+                # Table size contributions
+                for count in group_table_counts.values():
+                    if count > 1:
+                        for i in range(1, count):
+                            log_lik += np.log(i - self.d_j)
+        
+        return log_lik
+    
+    def _compute_log_prior(self) -> float:
+        """
+        Compute log-prior probability for current hyperparameters.
+        
+        Priors:
+            d_0, d_j ~ Uniform(0, 1)
+            theta_0, theta_j ~ Gamma(shape=300, rate=0.2)
+        
+        Returns:
+            Log-prior probability
+        """
+        return (self.d_0_prior.log_pdf(self.d_0) +
+                self.d_j_prior.log_pdf(self.d_j) +
+                self.theta_0_prior.log_pdf(self.theta_0) +
+                self.theta_j_prior.log_pdf(self.theta_j))
+    
+    def _update_parameters_mh(self, data_dict: Dict[int, List[str]], in_burnin: bool = False):
+        """
+        Update hyperparameters using Metropolis-Hastings with proper acceptance ratios.
+        
+        Args:
+            data_dict: Dictionary of observed data
+            in_burnin: Whether currently in burn-in phase (for adaptive proposals)
+        """
+        # Compute current log-posterior
+        log_post_current = self._compute_log_likelihood() + self._compute_log_prior()
         
         # Update d_0
-        d_0_prop = self.d_0 + np.random.normal(0, 0.01)
-        if 0 <= d_0_prop < 1:
-            # Compute acceptance ratio (simplified)
-            if np.random.random() < 0.5:  # Placeholder acceptance probability
-                self.d_0 = d_0_prop
+        d_0_prop = self.d_0 + np.random.normal(0, self._proposal_d)
+        self._proposal_counts['d_0'] += 1
+        
+        if 0 < d_0_prop < 1:
+            # Temporarily update
+            d_0_old = self.d_0
+            self.d_0 = d_0_prop
+            
+            # Compute proposed log-posterior
+            try:
+                log_post_prop = self._compute_log_likelihood() + self._compute_log_prior()
+                
+                # Metropolis-Hastings acceptance
+                log_alpha = min(0, log_post_prop - log_post_current)
+                if np.log(np.random.random()) < log_alpha:
+                    # Accept
+                    log_post_current = log_post_prop
+                    self._accept_counts['d_0'] += 1
+                else:
+                    # Reject
+                    self.d_0 = d_0_old
+            except (ValueError, FloatingPointError):
+                # Reject on numerical errors
+                self.d_0 = d_0_old
         
         # Update d_j
-        d_j_prop = self.d_j + np.random.normal(0, 0.01)
-        if 0 <= d_j_prop < 1:
-            if np.random.random() < 0.5:
-                self.d_j = d_j_prop
+        d_j_prop = self.d_j + np.random.normal(0, self._proposal_d)
+        self._proposal_counts['d_j'] += 1
+        
+        if 0 < d_j_prop < 1:
+            d_j_old = self.d_j
+            self.d_j = d_j_prop
+            
+            try:
+                log_post_prop = self._compute_log_likelihood() + self._compute_log_prior()
+                log_alpha = min(0, log_post_prop - log_post_current)
+                
+                if np.log(np.random.random()) < log_alpha:
+                    log_post_current = log_post_prop
+                    self._accept_counts['d_j'] += 1
+                else:
+                    self.d_j = d_j_old
+            except (ValueError, FloatingPointError):
+                self.d_j = d_j_old
         
         # Update theta_0
-        theta_0_prop = self.theta_0 + np.random.normal(0, 10)
+        theta_0_prop = self.theta_0 + np.random.normal(0, self._proposal_theta)
+        self._proposal_counts['theta_0'] += 1
+        
         if theta_0_prop > -self.d_0:
-            if np.random.random() < 0.5:
-                self.theta_0 = theta_0_prop
+            theta_0_old = self.theta_0
+            self.theta_0 = theta_0_prop
+            
+            try:
+                log_post_prop = self._compute_log_likelihood() + self._compute_log_prior()
+                log_alpha = min(0, log_post_prop - log_post_current)
+                
+                if np.log(np.random.random()) < log_alpha:
+                    log_post_current = log_post_prop
+                    self._accept_counts['theta_0'] += 1
+                else:
+                    self.theta_0 = theta_0_old
+            except (ValueError, FloatingPointError):
+                self.theta_0 = theta_0_old
         
         # Update theta_j
-        theta_j_prop = self.theta_j + np.random.normal(0, 10)
+        theta_j_prop = self.theta_j + np.random.normal(0, self._proposal_theta)
+        self._proposal_counts['theta_j'] += 1
+        
         if theta_j_prop > -self.d_j:
-            if np.random.random() < 0.5:
-                self.theta_j = theta_j_prop
+            theta_j_old = self.theta_j
+            self.theta_j = theta_j_prop
+            
+            try:
+                log_post_prop = self._compute_log_likelihood() + self._compute_log_prior()
+                log_alpha = min(0, log_post_prop - log_post_current)
+                
+                if np.log(np.random.random()) < log_alpha:
+                    self._accept_counts['theta_j'] += 1
+                else:
+                    self.theta_j = theta_j_old
+            except (ValueError, FloatingPointError):
+                self.theta_j = theta_j_old
+        
+        # Adaptive tuning during burn-in (every 50 iterations)
+        if in_burnin and self._proposal_counts['d_0'] % 50 == 0:
+            # Adjust proposal variances to target 25-40% acceptance
+            for param in ['d_0', 'd_j']:
+                if self._proposal_counts[param] > 0:
+                    accept_rate = self._accept_counts[param] / self._proposal_counts[param]
+                    if accept_rate < 0.25:
+                        self._proposal_d *= 0.9
+                    elif accept_rate > 0.40:
+                        self._proposal_d *= 1.1
+            
+            for param in ['theta_0', 'theta_j']:
+                if self._proposal_counts[param] > 0:
+                    accept_rate = self._accept_counts[param] / self._proposal_counts[param]
+                    if accept_rate < 0.25:
+                        self._proposal_theta *= 0.9
+                    elif accept_rate > 0.40:
+                        self._proposal_theta *= 1.1
     
     def sample_predictive(
         self,
@@ -692,6 +868,12 @@ class HierarchicalPitmanYorProcess:
         # Copy counters
         new_model._next_table_id = self._next_table_id
         new_model._next_dish_id = self._next_dish_id
+        
+        # Copy M-H proposal variances and acceptance tracking
+        new_model._proposal_d = self._proposal_d
+        new_model._proposal_theta = self._proposal_theta
+        new_model._accept_counts = dict(self._accept_counts)
+        new_model._proposal_counts = dict(self._proposal_counts)
         
         return new_model
     
