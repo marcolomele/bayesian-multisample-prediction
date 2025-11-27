@@ -108,7 +108,7 @@ class HierarchicalPitmanYorProcess:
         
     def _sample_from_base_measure(self) -> Any:
         """
-        Sample from the base measure H.
+        Sample from the sure H.
         
         Returns:
             A sample from H

@@ -1,0 +1,55 @@
+============================================================
+LINEARITY CHECK (Theorem 1 Verification)
+============================================================
+
+Testing if L_m is linear in m:
+  L_m ≈ slope * m + intercept
+
+
+Group 0 (sci.space):
+  Slope:       0.1061
+  Intercept:   6.5858
+  R²:          0.999153
+  p-value:     1.05e-05
+  Std Error:   0.0018
+  ✓ Excellent linear fit (R² > 0.99)
+
+Group 1 (soc.religion.christian):
+  Slope:       0.1328
+  Intercept:   7.4536
+  R²:          0.999268
+  p-value:     8.41e-06
+  Std Error:   0.0021
+  ✓ Excellent linear fit (R² > 0.99)
+
+Group 2 (alt.atheism):
+  Slope:       0.1096
+  Intercept:   6.9859
+  R²:          0.999113
+  p-value:     1.12e-05
+  Std Error:   0.0019
+  ✓ Excellent linear fit (R² > 0.99)
+
+Group 3 (sci.med):
+  Slope:       0.1022
+  Intercept:   6.5334
+  R²:          0.998902
+  p-value:     1.54e-05
+  Std Error:   0.0020
+  ✓ Excellent linear fit (R² > 0.99)
+
+Group 4 (talk.politics.guns):
+  Slope:       0.1182
+  Intercept:   7.4952
+  R²:          0.998922
+  p-value:     1.50e-05
+  Std Error:   0.0022
+  ✓ Excellent linear fit (R² > 0.99)
+
+Group 5 (rec.motorcycles):
+  Slope:       0.0884
+  Intercept:   5.7441
+  R²:          0.998877
+  p-value:     1.60e-05
+  Std Error:   0.0017
+  ✓ Excellent linear fit (R² > 0.99)

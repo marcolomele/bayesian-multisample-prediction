@@ -48,8 +48,8 @@ def process_text(text):
     return words
 
 # Process categories one by one
-base_path = '/Users/marcolomele/Documents/Repos/bayesian-multisample/data/twenty+newsgroups/twenty+newsgroups_original/20_newsgroups'
-categories = ['sci.space', 'soc.religion.christian']
+base_path = '/Users/marcolomele/Documents/Repos/bayesian-multisample/data_raw/twenty+newsgroups/twenty+newsgroups_original/20_newsgroups'
+categories = ['sci.space', 'soc.religion.christian', 'alt.atheism', 'sci.med', 'talk.politics.guns', 'rec.motorcycles']
 results = []
 
 for cat_name in categories:
@@ -96,6 +96,6 @@ else:
     df = pd.DataFrame(results)
     df = df.sort_values(['category', 'POS', 'count'], ascending=[True, True, False])
 
-output_path = f'/Users/marcolomele/Documents/Repos/bayesian-multisample/data/twenty+newsgroups/newsgroup_words_{X}.csv'
+output_path = f'/Users/marcolomele/Documents/Repos/bayesian-multisample/data/twenty+newsgroups/newsgroup_words_{X}_6cats.csv'
 df.to_csv(output_path, index=False)
 print(f"Saved {len(df)} rows to {output_path}")
